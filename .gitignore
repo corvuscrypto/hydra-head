@@ -1,2 +1,5 @@
 # ignore compiled binary
 hydraheadd
+# ignore any configs
+*.yml
+*.yaml
