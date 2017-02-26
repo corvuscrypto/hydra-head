@@ -1,5 +1,6 @@
 package main
 
 func main() {
-	//stuff
+	//run the connection routine
+	connectToMaster()
 }
