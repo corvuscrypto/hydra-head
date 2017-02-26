@@ -7,6 +7,7 @@ type packetType uint8
 const (
 	Ping packetType = iota
 	Acknowledgement
+	KeyTransfer
 	DiscoveryRequest
 	DiscoveryChallenge
 	DiscoveryAccept

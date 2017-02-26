@@ -4,6 +4,7 @@ import (
 	"crypto/cipher"
 	"encoding/gob"
 	"log"
+	"math/big"
 	"net"
 	"time"
 )
@@ -29,13 +30,50 @@ func (e encryptedConnection) Read(dst []byte) (n int, err error) {
 func newMasterConn(t *net.TCPConn) (conn *encryptedConnection, err error) {
 	conn = new(encryptedConnection)
 	conn.tcpConn = t
+
+	//create a raw gob (d)e(n)coder
+	decoder := gob.NewDecoder(t)
+	encoder := gob.NewEncoder(t)
+
 	//create a new private key for exchange
 	priv, X, Y, err := createNewKey()
 	if err != nil {
 		return nil, err
 	}
-	//TODO: Write key exchange
-	conn.cipherBlock, err = createNewCipher(priv, X, Y)
+
+	keyTransferPacket := &keyTransfer{
+		newPacket(KeyTransfer),
+		X.Bytes(),
+		Y.Bytes(),
+		X.Sign(),
+		Y.Sign(),
+	}
+
+	//send the public key
+	err = encoder.Encode(keyTransferPacket)
+	if err != nil {
+		t.Close()
+		return
+	}
+	//receive the master's public key
+	masterKeyPacket := new(keyTransfer)
+	err = decoder.Decode(masterKeyPacket)
+	if err != nil {
+		t.Close()
+		return
+	}
+
+	//reconstruct public key from the packet rx'd
+	masterX := big.NewInt(0).SetBytes(masterKeyPacket.X)
+	if masterKeyPacket.XSign == -1 {
+		masterX = masterX.Neg(masterX)
+	}
+	masterY := big.NewInt(0).SetBytes(masterKeyPacket.Y)
+	if masterKeyPacket.YSign == -1 {
+		masterY = masterY.Neg(masterY)
+	}
+
+	conn.cipherBlock, err = createNewCipher(priv, masterX, masterY)
 	return
 }
 
