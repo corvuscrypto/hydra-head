@@ -12,11 +12,11 @@ var paths = []string{"./config.yml", "./config.yaml"}
 
 type config struct {
 	Security struct {
-		SecretKey string
+		Secret string
 	}
 	Master struct {
-		MasterAddress string
-		MasterPort    string
+		Address string
+		Port    string
 	}
 }
 
@@ -40,4 +40,6 @@ func init() {
 		fmt.Println("Unable to read config file!", err)
 		os.Exit(1)
 	}
+
+	fmt.Println(globalConfig)
 }
