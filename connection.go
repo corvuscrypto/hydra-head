@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"log"
 	"net"
+	"time"
 )
 
 type encryptedConnection struct {
@@ -48,14 +49,27 @@ var globalConnection *masterConnection
 
 func connectToMaster() {
 
-	masterAddr, err := net.ResolveTCPAddr("tcp", globalConfig.Master.MasterAddress+":"+globalConfig.Master.MasterPort)
+	masterAddr, err := net.ResolveTCPAddr("tcp", globalConfig.Master.Address+":"+globalConfig.Master.Port)
 	if err != nil {
-		log.Fatal("Unable to resolve address for master:", err)
+		log.Fatal("Unable to resolve address for master: ", err)
 	}
 
 	tcpConn, err := net.DialTCP("tcp", nil, masterAddr)
 	if err != nil {
-		log.Fatal(err)
+		//reattempt connection up to 5 times using doubling backoff
+		backoffStartMilli := uint(250)
+		for i := uint(0); i < 5; i++ {
+			<-time.Tick(time.Millisecond * time.Duration(backoffStartMilli<<i))
+			log.Printf("Re-attempting to connect (attempt #%d; waited: %.2f s)\n", i+1, float64(backoffStartMilli<<i)/1000)
+			tcpConn, err = net.DialTCP("tcp", nil, masterAddr)
+			if err == nil {
+				break
+			}
+		}
+		//if still unable to connect fatally report error
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	//make the new encrypted connection
