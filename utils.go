@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/gob"
 	"sync/atomic"
 	"time"
@@ -24,4 +25,10 @@ func receivePacket(d *gob.Decoder, expectedPacket interface{}) error {
 
 func sendPacket(e *gob.Encoder, packet interface{}) {
 	e.Encode(packet)
+}
+
+func createNonce() (nonce []byte) {
+	nonce = make([]byte, 12)
+	rand.Read(nonce)
+	return
 }

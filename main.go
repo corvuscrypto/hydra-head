@@ -19,5 +19,4 @@ func main() {
 	fmt.Println(ID)
 	//run the connection routine
 	connectToMaster()
-	select {}
 }
