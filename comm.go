@@ -51,7 +51,7 @@ type keyTransfer struct {
 
 type discoveryRequest struct {
 	packet
-	ID        string
+	SlaveID   string
 	Resources []string
 }
 

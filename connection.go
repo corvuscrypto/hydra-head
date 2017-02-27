@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"crypto/cipher"
+	"encoding/binary"
 	"encoding/gob"
 	"log"
 	"math/big"
@@ -14,16 +16,37 @@ type encryptedConnection struct {
 	cipherBlock cipher.AEAD
 }
 
-func (e encryptedConnection) Write(data []byte) (n int, err error) {
+func (e *encryptedConnection) Write(data []byte) (n int, err error) {
+	nonce := createNonce()
 	var cipherText []byte
-	e.cipherBlock.Seal(cipherText, nil, data, nil)
-	return e.tcpConn.Write(cipherText)
+	cipherText = e.cipherBlock.Seal(cipherText, nonce, data, nil)
+	return e.tcpConn.Write(append(nonce, cipherText...))
 }
 
-func (e encryptedConnection) Read(dst []byte) (n int, err error) {
-	var cipherText []byte
-	n, err = e.tcpConn.Read(cipherText)
-	e.cipherBlock.Open(dst, nil, cipherText, nil)
+func (e *encryptedConnection) Read(dst []byte) (n int, err error) {
+	var buffer = make([]byte, 1)
+	n, err = e.tcpConn.Read(buffer)
+	if err != nil {
+		return
+	}
+
+	vlqLength := buffer[0]
+	buf2 := make([]byte, vlqLength)
+	n, err = e.tcpConn.Read(buf2)
+	if err != nil {
+		return
+	}
+	bytesReader := bytes.NewReader(buf2)
+	length, err := binary.ReadUvarint(bytesReader)
+	finBuf := make([]byte, length)
+	n, err = e.tcpConn.Read(finBuf)
+	var dest []byte
+	dest, err = e.cipherBlock.Open(nil, finBuf[:12], finBuf[12:n], nil)
+	n = len(dest)
+	for i, b := range dest {
+		dst[i] = b
+	}
+
 	return
 }
 
@@ -35,6 +58,18 @@ func newMasterConn(t *net.TCPConn) (conn *encryptedConnection, err error) {
 	decoder := gob.NewDecoder(t)
 	encoder := gob.NewEncoder(t)
 
+	//this should be in the discovery file, but I'll move to there later
+	//I just want to get things tested and move forward
+
+	//first send the discovery offer
+	initialDiscoveryPacket := &discoveryRequest{}
+	initialDiscoveryPacket.packet = newPacket(DiscoveryRequest)
+	initialDiscoveryPacket.SlaveID = ID
+	initialDiscoveryPacket.Resources = []string{"exampleResource1", "exampleResource2"}
+	err = encoder.Encode(initialDiscoveryPacket)
+	if err != nil {
+		log.Fatal(err)
+	}
 	//create a new private key for exchange
 	priv, X, Y, err := createNewKey()
 	if err != nil {
@@ -48,13 +83,14 @@ func newMasterConn(t *net.TCPConn) (conn *encryptedConnection, err error) {
 		X.Sign(),
 		Y.Sign(),
 	}
-
+	log.Println("Sending key")
 	//send the public key
 	err = encoder.Encode(keyTransferPacket)
 	if err != nil {
 		t.Close()
 		return
 	}
+	log.Println("receiving key")
 	//receive the master's public key
 	masterKeyPacket := new(keyTransfer)
 	err = decoder.Decode(masterKeyPacket)
@@ -62,7 +98,6 @@ func newMasterConn(t *net.TCPConn) (conn *encryptedConnection, err error) {
 		t.Close()
 		return
 	}
-
 	//reconstruct public key from the packet rx'd
 	masterX := big.NewInt(0).SetBytes(masterKeyPacket.X)
 	if masterKeyPacket.XSign == -1 {
@@ -73,6 +108,7 @@ func newMasterConn(t *net.TCPConn) (conn *encryptedConnection, err error) {
 		masterY = masterY.Neg(masterY)
 	}
 
+	log.Println("constructing shared secret", err)
 	conn.cipherBlock, err = createNewCipher(priv, masterX, masterY)
 	return
 }
@@ -110,6 +146,30 @@ func connectToMaster() {
 		}
 	}
 
+	log.Println("Connected to master")
+
 	//make the new encrypted connection
-	newMasterConn(tcpConn)
+	encConn, err := newMasterConn(tcpConn)
+	if err != nil {
+		encConn.tcpConn.Close()
+	}
+
+	// encoder := gob.NewEncoder(encConn)
+	// decoder := gob.NewDecoder(encConn)
+
+	log.Println("created encrypted connection")
+	globalConnection = &masterConnection{}
+	globalConnection.conn = encConn
+	globalConnection.encoder = gob.NewEncoder(globalConnection.conn)
+	globalConnection.decoder = gob.NewDecoder(globalConnection.conn)
+
+	log.Println("Awaiting challenge")
+	//Now wait for the challenge
+	challenge := new(discoveryChallenge)
+	err = globalConnection.decoder.Decode(challenge)
+	if err != nil {
+		return
+	}
+
+	log.Println("Received Challenge")
 }
